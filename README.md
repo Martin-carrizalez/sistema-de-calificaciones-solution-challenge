@@ -69,7 +69,7 @@ Ejecuta el siguiente comando para instalar las librerías necesarias:
 
 ```bash
 pip install streamlit pandas openpyxl plotly
-
+´´´
 ##👨‍💻 Créditos
 
 Sistema creado por el **QFB y LIACD Martín Ángel Carrizalez Piña**.
