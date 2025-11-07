@@ -304,6 +304,7 @@ elif st.session_state.mode == 'admin':
             st.warning("No hay calificaciones registradas para este tema")
 
 # MODO JUEZ
+# MODO JUEZ
 elif st.session_state.mode == 'juez':
     config = cargar_config()
     
@@ -314,155 +315,199 @@ elif st.session_state.mode == 'juez':
     jueces = config['jueces']
     equipos_por_tema = config['equipos_por_tema']
     
-    # Panel de juez en sidebar
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("👤 Panel de Juez")
-    juez_actual = st.sidebar.selectbox("Selecciona tu nombre:", jueces)
-    tema_actual = st.sidebar.selectbox("📚 Tema actual:", TEMAS)
-    modo = st.sidebar.radio("Modo:", ["📝 Calificar", "📊 Ver Ranking"])
+    # --- INICIO DE LA LÓGICA DE AUTENTICACIÓN ---
     
-    if modo == "📊 Ver Ranking":
-        auto_refresh = st.sidebar.checkbox("🔄 Auto-actualizar cada 3s")
-        if auto_refresh:
-            import time
-            time.sleep(3)
-            st.rerun()
-    
-    # CALIFICAR
-    if modo == "📝 Calificar":
-        st.header(f"📝 Calificar - {tema_actual}")
-        st.info(f"**Juez:** {juez_actual}")
+    # Si el juez NO está autenticado, mostrar formulario de login
+    if not st.session_state.get('juez_autenticado', False):
         
-        equipo = st.selectbox("🎪 Equipo a calificar:", equipos_por_tema[tema_actual])
+        st.header("👤 Login de Juez")
+        st.sidebar.markdown("---")
         
-        st.markdown("---")
-        total_puntos = 0
-        df_prev = obtener_calificaciones()
-        calificaciones_a_guardar = []
-        # Ver cuántos jueces han calificado este equipo
-        df_team = df_prev[
-            (df_prev['tema'] == tema_actual) & 
-            (df_prev['equipo'] == equipo)
-        ]
-        jueces_calificaron = df_team['juez'].unique() if not df_team.empty else []
-
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            st.info(f"**Equipo:** {equipo}")
-        with col2:
-            st.metric("Calificado por", f"{len(jueces_calificaron)}/{len(jueces)} jueces")
-
-        # Mostrar quién falta
-        if len(jueces_calificaron) < len(jueces):
-            faltan = [j for j in jueces if j not in jueces_calificaron]
-            st.warning(f"⏳ Faltan: {', '.join(faltan)}")
+        juez_seleccionado = st.sidebar.selectbox("Selecciona tu nombre:", jueces)
+        password_ingresada = st.sidebar.text_input("Contraseña:", type="password", key="juez_pass_input")
         
-        for categoria, criterios in CRITERIOS.items():
-            st.markdown(f"### {categoria}")
-            
-            for criterio in criterios:
-                col1, col2, col3 = st.columns([4, 1, 1.5])
+        if st.sidebar.button("Entrar", type="primary", use_container_width=True):
+            # Validar contraseña
+            try:
+                # 1. Busca la contraseña en secrets
+                password_correcta = st.secrets["passwords"][juez_seleccionado]
                 
-                prev = df_prev[
-                    (df_prev['tema'] == tema_actual) &
-                    (df_prev['equipo'] == equipo) &
-                    (df_prev['juez'] == juez_actual) &
-                    (df_prev['categoria'] == categoria) &
-                    (df_prev['criterio'] == criterio)
-                ] if not df_prev.empty else pd.DataFrame()
-                
-                if not prev.empty:
-                    cumple_str = str(prev.iloc[0]['cumple']).strip().upper()
-                    cumple_prev = (cumple_str == "TRUE")
-                    puntos_prev = float(prev.iloc[0]['puntos'])
-                    if cumple_prev and puntos_prev == 0:
-                        puntos_prev = 10.0
+                # 2. Compara
+                if password_ingresada == password_correcta:
+                    st.session_state.juez_autenticado = True
+                    st.session_state.juez_actual = juez_seleccionado # Guardamos el juez
+                    st.rerun()
                 else:
-                    cumple_prev = False
-                    puntos_prev = 10.0
-                
-                with col1:
-                    st.write(f"• {criterio}")
-                
-                with col2:
-                    cumple = st.checkbox("✓", value=cumple_prev, 
-                                    key=f"{tema_actual}_{equipo}_{juez_actual}_{categoria}_{criterio}")
-                
-                with col3:
-                    if cumple:
-                        puntos = st.number_input("Pts", 0.0, 10.0, puntos_prev, 0.5,
-                                            key=f"{tema_actual}_{equipo}_{juez_actual}_{categoria}_{criterio}_pts")
-                        total_puntos += puntos
-                    else:
-                        puntos = 0
-                        st.write("—")
-                
-                calificaciones_a_guardar.append({
-                    'tema': tema_actual,
-                    'equipo': equipo,
-                    'juez': juez_actual,
-                    'categoria': categoria,
-                    'criterio': criterio,
-                    'cumple': cumple,
-                    'puntos': puntos
-                })
+                    st.sidebar.error("Contraseña incorrecta")
+            except KeyError:
+                st.sidebar.error(f"Error: No se encontró una contraseña para '{juez_seleccionado}' en los secrets.")
+            except:
+                st.sidebar.error("Error al leer los secrets. Asegúrate de que [passwords] exista.")
         
-        st.markdown("---")
-        col1, col2, col3 = st.columns([1,2,1])
-        with col2:
-            st.metric("🎯 TOTAL DE PUNTOS", f"{total_puntos:.1f}")
-        
-        if st.button("💾 Guardar Calificación", type="primary", use_container_width=True):
-            progress_bar = st.progress(0)
-            status = st.empty()
-            
-            with st.spinner("Guardando..."):
-                total_items = len(calificaciones_a_guardar)
-                for i, calif in enumerate(calificaciones_a_guardar):
-                    guardar_calificacion(
-                        calif['tema'], calif['equipo'], calif['juez'],
-                        calif['categoria'], calif['criterio'],
-                        calif['cumple'], calif['puntos']
-                    )
-                    progress_bar.progress((i + 1) / total_items)
-                
-                obtener_calificaciones.clear()
-                progress_bar.empty()
-                
-            # Mostrar resumen
-            st.success(f"""
-            ✅ **Calificación Guardada**
-            - Equipo: {equipo}
-            - Total: {total_puntos:.1f} pts
-            - Juez: {juez_actual}
-            """)
-            st.balloons()
-            time.sleep(2)
-            st.rerun()
-    
-    # RANKING
+    # Si el juez SÍ ESTÁ AUTENTICADO, mostrar la app normal
     else:
-        st.header(f"📊 Ranking - {tema_actual}")
+        # Cargar el juez autenticado desde el estado
+        juez_actual = st.session_state.juez_actual
         
-        df_ranking = calcular_ranking(tema_actual)
+        # Panel de juez en sidebar
+        st.sidebar.markdown("---")
+        st.sidebar.subheader(f"👤 Juez: {juez_actual}")
         
-        if not df_ranking.empty:
-            if len(df_ranking) >= 3:
-                col1, col2, col3 = st.columns(3)
-                with col2:
-                    st.markdown("# 🥇")
-                    st.subheader(df_ranking.iloc[0]['equipo'])
-                    st.metric("", f"{df_ranking.iloc[0]['Promedio']:.2f}")
-                with col1:
-                    st.markdown("# 🥈")
-                    st.subheader(df_ranking.iloc[1]['equipo'])
-                    st.metric("", f"{df_ranking.iloc[1]['Promedio']:.2f}")
-                with col3:
-                    st.markdown("# 🥉")
-                    st.subheader(df_ranking.iloc[2]['equipo'])
-                    st.metric("", f"{df_ranking.iloc[2]['Promedio']:.2f}")
+        if st.sidebar.button("🔐 Cerrar Sesión", use_container_width=True):
+            del st.session_state.juez_autenticado
+            if 'juez_actual' in st.session_state:
+                del st.session_state.juez_actual
+            st.rerun()
+        
+        st.sidebar.markdown("---")
+        tema_actual = st.sidebar.selectbox("📚 Tema actual:", TEMAS)
+        modo = st.sidebar.radio("Modo:", ["📝 Calificar", "📊 Ver Ranking"])
+        
+        if modo == "📊 Ver Ranking":
+            auto_refresh = st.sidebar.checkbox("🔄 Auto-actualizar cada 3s")
+            if auto_refresh:
+                import time
+                time.sleep(3)
+                st.rerun()
+        
+        # --- (AQUÍ EMPIEZA TU CÓDIGO ORIGINAL) ---
+        
+        # CALIFICAR
+        if modo == "📝 Calificar":
+            st.header(f"📝 Calificar - {tema_actual}")
+            st.info(f"**Juez:** {juez_actual}")
+            
+            equipo = st.selectbox("🎪 Equipo a calificar:", equipos_por_tema[tema_actual])
             
             st.markdown("---")
-            st.dataframe(df_ranking, use_container_width=True, hide_index=True)
+            total_puntos = 0
+            df_prev = obtener_calificaciones()
+            calificaciones_a_guardar = []
+            
+            # Ver cuántos jueces han calificado este equipo
+            df_team = df_prev[
+                (df_prev['tema'] == tema_actual) & 
+                (df_prev['equipo'] == equipo)
+            ]
+            jueces_calificaron = df_team['juez'].unique() if not df_team.empty else []
+
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.info(f"**Equipo:** {equipo}")
+            with col2:
+                st.metric("Calificado por", f"{len(jueces_calificaron)}/{len(jueces)} jueces")
+
+            # Mostrar quién falta
+            if len(jueces_calificaron) < len(jueces):
+                faltan = [j for j in jueces if j not in jueces_calificaron]
+                st.warning(f"⏳ Faltan: {', '.join(faltan)}")
+            
+            for categoria, criterios in CRITERIOS.items():
+                st.markdown(f"### {categoria}")
+                
+                for criterio in criterios:
+                    col1, col2, col3 = st.columns([4, 1, 1.5])
+                    
+                    prev = df_prev[
+                        (df_prev['tema'] == tema_actual) &
+                        (df_prev['equipo'] == equipo) &
+                        (df_prev['juez'] == juez_actual) &
+                        (df_prev['categoria'] == categoria) &
+                        (df_prev['criterio'] == criterio)
+                    ] if not df_prev.empty else pd.DataFrame()
+                    
+                    if not prev.empty:
+                        cumple_str = str(prev.iloc[0]['cumple']).strip().upper()
+                        cumple_prev = (cumple_str == "TRUE")
+                        puntos_prev = float(prev.iloc[0]['puntos'])
+                        if cumple_prev and puntos_prev == 0:
+                            puntos_prev = 10.0
+                    else:
+                        cumple_prev = False
+                        puntos_prev = 10.0
+                    
+                    with col1:
+                        st.write(f"• {criterio}")
+                    
+                    with col2:
+                        cumple = st.checkbox("✓", value=cumple_prev, 
+                                           key=f"{tema_actual}_{equipo}_{juez_actual}_{categoria}_{criterio}")
+                    
+                    with col3:
+                        if cumple:
+                            puntos = st.number_input("Pts", 0.0, 10.0, puntos_prev, 0.5,
+                                                   key=f"{tema_actual}_{equipo}_{juez_actual}_{categoria}_{criterio}_pts")
+                            total_puntos += puntos
+                        else:
+                            puntos = 0
+                            st.write("—")
+                    
+                    calificaciones_a_guardar.append({
+                        'tema': tema_actual,
+                        'equipo': equipo,
+                        'juez': juez_actual,
+                        'categoria': categoria,
+                        'criterio': criterio,
+                        'cumple': cumple,
+                        'puntos': puntos
+                    })
+            
+            st.markdown("---")
+            col1, col2, col3 = st.columns([1,2,1])
+            with col2:
+                st.metric("🎯 TOTAL DE PUNTOS", f"{total_puntos:.1f}")
+            
+            if st.button("💾 Guardar Calificación", type="primary", use_container_width=True):
+                progress_bar = st.progress(0)
+                status = st.empty()
+                
+                with st.spinner("Guardando..."):
+                    total_items = len(calificaciones_a_guardar)
+                    for i, calif in enumerate(calificaciones_a_guardar):
+                        guardar_calificacion(
+                            calif['tema'], calif['equipo'], calif['juez'],
+                            calif['categoria'], calif['criterio'],
+                            calif['cumple'], calif['puntos']
+                        )
+                        progress_bar.progress((i + 1) / total_items)
+                    
+                    obtener_calificaciones.clear()
+                    progress_bar.empty()
+                    
+                # Mostrar resumen
+                st.success(f"""
+                ✅ **Calificación Guardada**
+                - Equipo: {equipo}
+                - Total: {total_puntos:.1f} pts
+                - Juez: {juez_actual}
+                """)
+                st.balloons()
+                time.sleep(2)
+                st.rerun()
+        
+        # RANKING
         else:
-            st.warning("No hay calificaciones aún")
+            st.header(f"📊 Ranking - {tema_actual}")
+            
+            df_ranking = calcular_ranking(tema_actual)
+            
+            if not df_ranking.empty:
+                if len(df_ranking) >= 3:
+                    col1, col2, col3 = st.columns(3)
+                    with col2:
+                        st.markdown("# 🥇")
+                        st.subheader(df_ranking.iloc[0]['equipo'])
+                        st.metric("", f"{df_ranking.iloc[0]['Promedio']:.2f}")
+                    with col1:
+                        st.markdown("# 🥈")
+                        st.subheader(df_ranking.iloc[1]['equipo'])
+                        st.metric("", f"{df_ranking.iloc[1]['Promedio']:.2f}")
+                    with col3:
+                        st.markdown("# 🥉")
+                        st.subheader(df_ranking.iloc[2]['equipo'])
+                        st.metric("", f"{df_ranking.iloc[2]['Promedio']:.2f}")
+                
+                st.markdown("---")
+                st.dataframe(df_ranking, use_container_width=True, hide_index=True)
+            else:
+                st.warning("No hay calificaciones aún")

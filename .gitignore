@@ -1,0 +1,25 @@
+# ------------------------------------
+# 1. Claves de Streamlit/Supabase
+# ------------------------------------
+# Archivo de secretos de Streamlit (generalmente en una carpeta .streamlit/)
+.streamlit/secrets.toml
+.streamlit/credentials.toml
+.streamlit/*.json 
+
+# Si usas variables de entorno locales (ej. para desarrollo)
+.env
+.env.local
+
+# ------------------------------------
+# 2. Archivos Temporales y Caché de Python/Streamlit
+# ------------------------------------
+# Archivos de caché de Python
+__pycache__/
+*.pyc
+
+# Carpeta de entorno virtual (si la tienes)
+venv/
+.venv/
+
+# Caché de Streamlit
+.streamlit_cache/
