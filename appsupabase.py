@@ -7,6 +7,33 @@ import json
 import time
 st.set_page_config(page_title="Sistema de Calificación", page_icon="🏆", layout="wide")
 
+st.markdown("""
+<style>
+    /* Mejor responsive para móviles */
+    @media (max-width: 768px) {
+        .stNumberInput > div > div > input {
+            font-size: 18px !important;
+        }
+        .stCheckbox > label > span {
+            font-size: 16px !important;
+        }
+        div[data-testid="column"] {
+            padding: 0.2rem !important;
+        }
+    }
+    /* Checkboxes más grandes */
+    .stCheckbox > label > div[role="checkbox"] {
+        width: 25px;
+        height: 25px;
+    }
+    /* Botones más visibles */
+    .stButton > button {
+        min-height: 50px;
+        font-size: 18px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # MODO ADMIN
 if 'mode' not in st.session_state:
     st.session_state.mode = 'juez'  # Por defecto modo juez
@@ -94,6 +121,24 @@ def calcular_ranking(tema):
     pivot = pivot.sort_values('Promedio', ascending=False)
     pivot.insert(0, 'Posición', range(1, len(pivot) + 1))
     return pivot.reset_index()
+
+def generar_excel():
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Resumen por tema
+        for tema in TEMAS:
+            df = calcular_ranking(tema)
+            if not df.empty:
+                sheet_name = tema.split('.')[1].strip()[:31]
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        
+        # Detalle completo
+        df_all = obtener_calificaciones()
+        if not df_all.empty:
+            df_all.to_excel(writer, sheet_name='Detalle Completo', index=False)
+    
+    output.seek(0)
+    return output
 
 # UI Principal
 st.title("🏆 Sistema de Calificación - Solution Challenge 2025B")
@@ -186,6 +231,17 @@ elif st.session_state.mode == 'admin':
                 obtener_calificaciones.clear()
                 st.success("✅ Sistema reiniciado")
                 st.rerun()
+    # En el tab3 del admin:
+    with tab3:
+        st.subheader("📥 Exportar Resultados")
+        if st.button("📊 Generar Excel"):
+            excel = generar_excel()
+            st.download_button(
+                "⬇️ Descargar Excel",
+                excel,
+                f"resultados_challenge_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                "application/vnd.ms-excel"
+            )
 
 # MODO JUEZ
 elif st.session_state.mode == 'juez':
@@ -223,6 +279,23 @@ elif st.session_state.mode == 'juez':
         total_puntos = 0
         df_prev = obtener_calificaciones()
         calificaciones_a_guardar = []
+        # Ver cuántos jueces han calificado este equipo
+        df_team = df_prev[
+            (df_prev['tema'] == tema_actual) & 
+            (df_prev['equipo'] == equipo)
+        ]
+        jueces_calificaron = df_team['juez'].unique() if not df_team.empty else []
+
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.info(f"**Equipo:** {equipo}")
+        with col2:
+            st.metric("Calificado por", f"{len(jueces_calificaron)}/{len(jueces)} jueces")
+
+        # Mostrar quién falta
+        if len(jueces_calificaron) < len(jueces):
+            faltan = [j for j in jueces if j not in jueces_calificaron]
+            st.warning(f"⏳ Faltan: {', '.join(faltan)}")
         
         for categoria, criterios in CRITERIOS.items():
             st.markdown(f"### {categoria}")
@@ -280,18 +353,32 @@ elif st.session_state.mode == 'juez':
             st.metric("🎯 TOTAL DE PUNTOS", f"{total_puntos:.1f}")
         
         if st.button("💾 Guardar Calificación", type="primary", use_container_width=True):
+            progress_bar = st.progress(0)
+            status = st.empty()
+            
             with st.spinner("Guardando..."):
-                for calif in calificaciones_a_guardar:
+                total_items = len(calificaciones_a_guardar)
+                for i, calif in enumerate(calificaciones_a_guardar):
                     guardar_calificacion(
                         calif['tema'], calif['equipo'], calif['juez'],
                         calif['categoria'], calif['criterio'],
                         calif['cumple'], calif['puntos']
                     )
+                    progress_bar.progress((i + 1) / total_items)
+                
                 obtener_calificaciones.clear()
-                st.success(f"✅ Guardado: {equipo} - Total: {total_puntos:.1f} pts")
-                st.balloons()
-                time.sleep(1.5)
-                st.rerun()
+                progress_bar.empty()
+                
+            # Mostrar resumen
+            st.success(f"""
+            ✅ **Calificación Guardada**
+            - Equipo: {equipo}
+            - Total: {total_puntos:.1f} pts
+            - Juez: {juez_actual}
+            """)
+            st.balloons()
+            time.sleep(2)
+            st.rerun()
     
     # RANKING
     else:
