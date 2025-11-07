@@ -180,7 +180,7 @@ elif st.session_state.mode == 'admin':
     
     config = cargar_config()
     
-    tab1, tab2, tab3 = st.tabs(["📝 Configuración", "🗑️ Reiniciar Sistema", "📊 Exportar Datos"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📝 Configuración", "🗑️ Reiniciar Sistema", "📊 Exportar Datos","🏆 Visualizar Rankings"])
     
     with tab1:
         st.subheader("Configuración del Sistema")
@@ -242,6 +242,66 @@ elif st.session_state.mode == 'admin':
                 f"resultados_challenge_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
                 "application/vnd.ms-excel"
             )
+
+    with tab4:
+        st.subheader("🏆 Rankings en Vivo")
+        
+        # Selector de tema
+        tema_mostrar = st.selectbox("Selecciona el tema:", TEMAS, key="admin_tema_ranking")
+        
+        # Auto-refresh para proyección
+        auto_refresh = st.checkbox("🔄 Auto-actualizar cada 5 segundos", key="admin_refresh")
+        if auto_refresh:
+            time.sleep(5)
+            st.rerun()
+        
+        # Mostrar ranking grande para proyectar
+        df_ranking = calcular_ranking(tema_mostrar)
+        
+        if not df_ranking.empty:
+            # Podio visual más grande
+            st.markdown("---")
+            if len(df_ranking) >= 3:
+                col1, col2, col3 = st.columns(3)
+                with col2:
+                    st.markdown("<h1 style='text-align:center;font-size:60px;'>🥇</h1>", unsafe_allow_html=True)
+                    st.markdown(f"<h2 style='text-align:center;'>{df_ranking.iloc[0]['equipo']}</h2>", unsafe_allow_html=True)
+                    st.markdown(f"<h1 style='text-align:center;color:gold;'>{df_ranking.iloc[0]['Promedio']:.2f}</h1>", unsafe_allow_html=True)
+                with col1:
+                    st.markdown("<h1 style='text-align:center;font-size:50px;'>🥈</h1>", unsafe_allow_html=True)
+                    st.markdown(f"<h3 style='text-align:center;'>{df_ranking.iloc[1]['equipo']}</h3>", unsafe_allow_html=True)
+                    st.markdown(f"<h2 style='text-align:center;color:silver;'>{df_ranking.iloc[1]['Promedio']:.2f}</h2>", unsafe_allow_html=True)
+                with col3:
+                    st.markdown("<h1 style='text-align:center;font-size:50px;'>🥉</h1>", unsafe_allow_html=True)
+                    st.markdown(f"<h3 style='text-align:center;'>{df_ranking.iloc[2]['equipo']}</h3>", unsafe_allow_html=True)
+                    st.markdown(f"<h2 style='text-align:center;color:#CD7F32;'>{df_ranking.iloc[2]['Promedio']:.2f}</h2>", unsafe_allow_html=True)
+            
+            st.markdown("")
+            
+            # Tabla completa con estilo para proyección
+            st.markdown("<h2>📊 Tabla de Posiciones</h2>", unsafe_allow_html=True)
+            
+            # Hacer la tabla más grande para proyección
+            st.markdown("""
+            <style>
+                .dataframe td, .dataframe th {
+                    font-size: 20px !important;
+                    padding: 15px !important;
+                }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            st.dataframe(
+                df_ranking, 
+                use_container_width=True, 
+                hide_index=True,
+                height=600
+            )
+            
+            # Última actualización
+            st.info(f"🕐 Última actualización: {datetime.now().strftime('%H:%M:%S')}")
+        else:
+            st.warning("No hay calificaciones registradas para este tema")
 
 # MODO JUEZ
 elif st.session_state.mode == 'juez':
