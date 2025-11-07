@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from io import BytesIO
 import json
-
+import time
 st.set_page_config(page_title="Sistema de Calificación", page_icon="🏆", layout="wide")
 
 # MODO ADMIN
