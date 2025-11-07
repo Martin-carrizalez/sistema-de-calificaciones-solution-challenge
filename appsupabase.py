@@ -5,6 +5,8 @@ from datetime import datetime
 from io import BytesIO
 import json
 import time
+import altair as alt
+
 st.set_page_config(page_title="Sistema de Calificación", page_icon="🏆", layout="wide")
 
 st.markdown("""
@@ -44,10 +46,10 @@ def obtener_calificaciones():
     return pd.DataFrame(response.data)
 
 @st.cache_resource
-def init_supabase():
+def init_supabase_v2():
     return create_client(st.secrets["supabase_url"], st.secrets["supabase_key"])
 
-supabase = init_supabase()
+supabase = init_supabase_v2()
 
 TEMAS = [
     "1. SOP - Síndrome de Ovario Poliquístico",
@@ -164,11 +166,20 @@ if st.session_state.mode == 'admin_login':
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Entrar", type="primary"):
-            if password == "challenge2025":  # CAMBIA ESTA CONTRASEÑA
-                st.session_state.mode = 'admin'
-                st.rerun()
-            else:
-                st.error("❌ Contraseña incorrecta")
+            try:
+                # 1. LECTURA SEGURA: Lee la contraseña del admin desde secrets.toml
+                password_correcta = st.secrets["admin"]["password"]
+                
+                # 2. COMPARACIÓN
+                if password == password_correcta:
+                    st.session_state.mode = 'admin'
+                    st.rerun()
+                else:
+                    st.error("❌ Contraseña incorrecta")
+            
+            except KeyError:
+                # 3. MANEJO DE ERRORES: Evita que la app falle si secrets.toml está incompleto
+                st.error("❌ Error: La contraseña de administrador no está configurada en secrets.toml.")
     with col2:
         if st.button("Cancelar"):
             st.session_state.mode = 'juez'
@@ -247,7 +258,7 @@ elif st.session_state.mode == 'admin':
         st.subheader("🏆 Rankings en Vivo")
         
         # Selector de tema
-        tema_mostrar = st.selectbox("Selecciona el tema:", TEMAS, key="admin_tema_ranking")
+        tema_mostrar = st.selectbox("Selecciona el tema:", TEMAS, index=0, key="admin_tema_ranking")
         
         # Auto-refresh para proyección
         auto_refresh = st.checkbox("🔄 Auto-actualizar cada 5 segundos", key="admin_refresh")
@@ -276,6 +287,36 @@ elif st.session_state.mode == 'admin':
                     st.markdown(f"<h3 style='text-align:center;'>{df_ranking.iloc[2]['equipo']}</h3>", unsafe_allow_html=True)
                     st.markdown(f"<h2 style='text-align:center;color:#CD7F32;'>{df_ranking.iloc[2]['Promedio']:.2f}</h2>", unsafe_allow_html=True)
             
+            st.subheader("Gráfico de Promedios")
+
+            if not df_ranking.empty:
+                # Ordenar por promedio para que el degradado tenga sentido
+                df_ranking_sorted = df_ranking.sort_values('Promedio', ascending=False).reset_index(drop=True)
+                
+                # Crear un campo para el color basado en la posición o el promedio
+                # Esto asignará un color desde el verde (más alto) hasta el rojo (más bajo)
+                chart = alt.Chart(df_ranking_sorted).mark_bar().encode(
+                    # Convertimos 'equipo' a nominal para que cada equipo sea una barra separada
+                    y=alt.Y('equipo:N', sort='-x', title='Equipo'), # Sort='-x' ordena por 'Promedio' descendente
+                    x=alt.X('Promedio:Q', title='Puntuación Promedio'),
+                    color=alt.Color(
+                        'Promedio:Q', # Colorea basado en el promedio
+                        scale=alt.Scale(range=['red', 'orange', 'green']), # Degradado de rojo a verde
+                        legend=alt.Legend(title="Promedio") # Leyenda para la escala de color
+                    ),
+                    # Añadir texto con el promedio en cada barra para mayor claridad
+                    text=alt.Text('Promedio:Q', format='.2f') 
+                ).properties(
+                    title=f"Promedio de Calificaciones por Equipo ({tema_mostrar})"
+                ).interactive() # Permite zoom y pan, puedes quitar .interactive() si quieres que sea completamente estático
+
+                # Mostrar la gráfica en Streamlit
+                st.altair_chart(chart, use_container_width=True)
+
+            else:
+                st.warning("No hay calificaciones para mostrar en el gráfico.")
+    
+
             st.markdown("")
             
             # Tabla completa con estilo para proyección
@@ -325,25 +366,37 @@ elif st.session_state.mode == 'juez':
         
         juez_seleccionado = st.sidebar.selectbox("Selecciona tu nombre:", jueces)
         password_ingresada = st.sidebar.text_input("Contraseña:", type="password", key="juez_pass_input")
-        
+
         if st.sidebar.button("Entrar", type="primary", use_container_width=True):
-            # Validar contraseña
+            
+            # --- INICIALIZACIÓN CRÍTICA ---
+            password_correcta = None # Inicializamos a None para que siempre esté definida
+            error_ocurrido = False 
+
             try:
-                # 1. Busca la contraseña en secrets
+                # 1. Intenta LEER la contraseña del secret.
                 password_correcta = st.secrets["passwords"][juez_seleccionado]
                 
-                # 2. Compara
+            except KeyError:
+                # Error Específico: El nombre del juez no está en el archivo secrets.
+                st.sidebar.error(f"Error de Configuración: No se encontró una contraseña para '{juez_seleccionado}' en los secrets.")
+                error_ocurrido = True
+                
+            except Exception:
+                # Error Genérico (SOLUCIÓN AL DOBLE CLICK): st.secrets no responde a la primera.
+                st.sidebar.warning(f"Error temporal al leer los secrets. Por favor, haz clic en 'Entrar' OTRA VEZ.")
+                st.stop() # Detenemos el script aquí para forzar el segundo clic
+                
+            # --- LÓGICA DE COMPARACIÓN FINAL (Fuera del try/except) ---
+            # Solo comparamos si no hubo errores bloqueantes
+            if not error_ocurrido and password_correcta is not None: 
                 if password_ingresada == password_correcta:
                     st.session_state.juez_autenticado = True
                     st.session_state.juez_actual = juez_seleccionado # Guardamos el juez
                     st.rerun()
                 else:
                     st.sidebar.error("Contraseña incorrecta")
-            except KeyError:
-                st.sidebar.error(f"Error: No se encontró una contraseña para '{juez_seleccionado}' en los secrets.")
-            except:
-                st.sidebar.error("Error al leer los secrets. Asegúrate de que [passwords] exista.")
-        
+
     # Si el juez SÍ ESTÁ AUTENTICADO, mostrar la app normal
     else:
         # Cargar el juez autenticado desde el estado
@@ -360,7 +413,7 @@ elif st.session_state.mode == 'juez':
             st.rerun()
         
         st.sidebar.markdown("---")
-        tema_actual = st.sidebar.selectbox("📚 Tema actual:", TEMAS)
+        tema_actual = st.sidebar.selectbox("📚 Tema actual:", TEMAS, index=0)
         modo = st.sidebar.radio("Modo:", ["📝 Calificar", "📊 Ver Ranking"])
         
         if modo == "📊 Ver Ranking":
@@ -383,12 +436,17 @@ elif st.session_state.mode == 'juez':
             total_puntos = 0
             df_prev = obtener_calificaciones()
             calificaciones_a_guardar = []
-            
-            # Ver cuántos jueces han calificado este equipo
-            df_team = df_prev[
-                (df_prev['tema'] == tema_actual) & 
-                (df_prev['equipo'] == equipo)
-            ]
+             # NUEVA VERIFICACIÓN DE SEGURIDAD (Si df_prev NO está vacío):
+            if not df_prev.empty:
+                # Si el DF NO está vacío, entonces filtramos:
+                df_team = df_prev[
+                    (df_prev['tema'] == tema_actual) & 
+                    (df_prev['equipo'] == equipo)
+                ]
+            else:
+                # Si el DF está vacío, inicializamos df_team como vacío para evitar el KeyError
+                df_team = pd.DataFrame()
+
             jueces_calificaron = df_team['juez'].unique() if not df_team.empty else []
 
             col1, col2 = st.columns([3, 1])
@@ -506,6 +564,34 @@ elif st.session_state.mode == 'juez':
                         st.markdown("# 🥉")
                         st.subheader(df_ranking.iloc[2]['equipo'])
                         st.metric("", f"{df_ranking.iloc[2]['Promedio']:.2f}")
+                st.subheader("Gráfico de Promedios")
+
+                if not df_ranking.empty:
+                    # Ordenar por promedio para que el degradado tenga sentido
+                    df_ranking_sorted = df_ranking.sort_values('Promedio', ascending=False).reset_index(drop=True)
+                    
+                    # Crear un campo para el color basado en la posición o el promedio
+                    # Esto asignará un color desde el verde (más alto) hasta el rojo (más bajo)
+                    chart = alt.Chart(df_ranking_sorted).mark_bar().encode(
+                        # Convertimos 'equipo' a nominal para que cada equipo sea una barra separada
+                        y=alt.Y('equipo:N', sort='-x', title='Equipo'), # Sort='-x' ordena por 'Promedio' descendente
+                        x=alt.X('Promedio:Q', title='Puntuación Promedio'),
+                        color=alt.Color(
+                            'Promedio:Q', # Colorea basado en el promedio
+                            scale=alt.Scale(range=['red', 'orange', 'green']), # Degradado de rojo a verde
+                            legend=alt.Legend(title="Promedio") # Leyenda para la escala de color
+                        ),
+                        # Añadir texto con el promedio en cada barra para mayor claridad
+                        text=alt.Text('Promedio:Q', format='.2f') 
+                    ).properties(
+                        title=f"Promedio de Calificaciones por Equipo ({tema_actual})"
+                    ).interactive() # Permite zoom y pan, puedes quitar .interactive() si quieres que sea completamente estático
+
+                    # Mostrar la gráfica en Streamlit
+                    st.altair_chart(chart, use_container_width=True)
+
+                else:
+                    st.warning("No hay calificaciones para mostrar en el gráfico.")        
                 
                 st.markdown("---")
                 st.dataframe(df_ranking, use_container_width=True, hide_index=True)
